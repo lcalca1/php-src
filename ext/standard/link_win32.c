@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2016 The PHP Group                                |
+   | Copyright (c) 1997-2018 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,7 +16,6 @@
    +----------------------------------------------------------------------+
  */
 
-/* $Id$ */
 #ifdef PHP_WIN32
 
 #include "php.h"
@@ -44,7 +43,7 @@
 
 /*
 TODO:
-- Create php_readlink (done), php_link and php_symlink in win32/link.c
+- Create php_readlink (done), php_link (done) and php_symlink (done) in win32/link.c
 - Expose them (PHPAPI) so extensions developers can use them
 - define link/readlink/symlink to their php_ equivalent and use them in ext/standart/link.c
 - this file is then useless and we have a portable link API
@@ -63,7 +62,7 @@ TODO:
 PHP_FUNCTION(readlink)
 {
 	char *link;
-	size_t link_len;
+	ssize_t link_len;
 	char target[MAXPATHLEN];
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "p", &link, &link_len) == FAILURE) {
@@ -74,7 +73,8 @@ PHP_FUNCTION(readlink)
 		RETURN_FALSE;
 	}
 
-	if (php_sys_readlink(link, target, MAXPATHLEN) == -1) {
+	link_len = php_sys_readlink(link, target, MAXPATHLEN);
+	if (link_len == -1) {
 		php_error_docref(NULL, E_WARNING, "readlink failed to read the symbolic link (%s), error %d)", link, GetLastError());
 		RETURN_FALSE;
 	}
@@ -87,6 +87,7 @@ PHP_FUNCTION(readlink)
 PHP_FUNCTION(linkinfo)
 {
 	char *link;
+	char *dirname;
 	size_t link_len;
 	zend_stat_t sb;
 	int ret;
@@ -95,12 +96,22 @@ PHP_FUNCTION(linkinfo)
 		return;
 	}
 
+	dirname = estrndup(link, link_len);
+	php_dirname(dirname, link_len);
+
+	if (php_check_open_basedir(dirname)) {
+		efree(dirname);
+		RETURN_FALSE;
+	}
+
 	ret = VCWD_STAT(link, &sb);
 	if (ret == -1) {
 		php_error_docref(NULL, E_WARNING, "%s", strerror(errno));
+		efree(dirname);
 		RETURN_LONG(Z_L(-1));
 	}
 
+	efree(dirname);
 	RETURN_LONG((zend_long) sb.st_dev);
 }
 /* }}} */
@@ -111,28 +122,11 @@ PHP_FUNCTION(symlink)
 {
 	char *topath, *frompath;
 	size_t topath_len, frompath_len;
-	BOOLEAN ret;
+	int ret;
 	char source_p[MAXPATHLEN];
 	char dest_p[MAXPATHLEN];
 	char dirname[MAXPATHLEN];
 	size_t len;
-	DWORD attr;
-	HINSTANCE kernel32;
-	typedef BOOLEAN (WINAPI *csla_func)(LPCSTR, LPCSTR, DWORD);
-	csla_func pCreateSymbolicLinkA;
-
-	kernel32 = LoadLibrary("kernel32.dll");
-
-	if (kernel32) {
-		pCreateSymbolicLinkA = (csla_func)GetProcAddress(kernel32, "CreateSymbolicLinkA");
-		if (pCreateSymbolicLinkA == NULL) {
-			php_error_docref(NULL, E_WARNING, "Can't call CreateSymbolicLinkA");
-			RETURN_FALSE;
-		}
-	} else {
-		php_error_docref(NULL, E_WARNING, "Can't call get a handle on kernel32.dll");
-		RETURN_FALSE;
-	}
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "pp", &topath, &topath_len, &frompath, &frompath_len) == FAILURE) {
 		return;
@@ -166,18 +160,13 @@ PHP_FUNCTION(symlink)
 		RETURN_FALSE;
 	}
 
-	if ((attr = GetFileAttributes(topath)) == INVALID_FILE_ATTRIBUTES) {
-			php_error_docref(NULL, E_WARNING, "Could not fetch file information(error %d)", GetLastError());
-			RETURN_FALSE;
-	}
-
 	/* For the source, an expanded path must be used (in ZTS an other thread could have changed the CWD).
 	 * For the target the exact string given by the user must be used, relative or not, existing or not.
 	 * The target is relative to the link itself, not to the CWD. */
-	ret = pCreateSymbolicLinkA(source_p, topath, (attr & FILE_ATTRIBUTE_DIRECTORY ? 1 : 0));
+	ret = php_sys_symlink(topath, source_p);
 
-	if (!ret) {
-		php_error_docref(NULL, E_WARNING, "Cannot create symlink, error code(%d)", GetLastError());
+	if (ret == -1) {
+		php_error_docref(NULL, E_WARNING, "%s", strerror(errno));
 		RETURN_FALSE;
 	}
 
@@ -222,12 +211,11 @@ PHP_FUNCTION(link)
 	}
 
 #ifndef ZTS
-	ret = CreateHardLinkA(topath, frompath, NULL);
+	ret = php_sys_link(topath, frompath);
 #else
-	ret = CreateHardLinkA(dest_p, source_p, NULL);
+	ret = php_sys_link(dest_p, source_p);
 #endif
-
-	if (ret == 0) {
+	if (ret == -1) {
 		php_error_docref(NULL, E_WARNING, "%s", strerror(errno));
 		RETURN_FALSE;
 	}

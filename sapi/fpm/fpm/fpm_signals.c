@@ -1,5 +1,4 @@
 
-	/* $Id: fpm_signals.c,v 1.24 2008/08/26 15:09:15 anight Exp $ */
 	/* (c) 2007,2008 Andrei Nigmatulin */
 
 #include "fpm_config.h"
@@ -174,7 +173,7 @@ static void sig_handler(int signo) /* {{{ */
 
 	saved_errno = errno;
 	s = sig_chars[signo];
-	write(sp[1], &s, sizeof(s));
+	zend_quiet_write(sp[1], &s, sizeof(s));
 	errno = saved_errno;
 }
 /* }}} */

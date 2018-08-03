@@ -11,14 +11,14 @@ if ($php === false) {
 $proc = proc_open(
 	"$php -n",
 	array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')),
-	$pipes, getcwd(), array(), array('binary_pipes' => true)
+	$pipes, getcwd(), array(), array()
 );
 if ($proc === false) {
 	print "something went wrong.\n";
 }
 var_dump($pipes);
 stream_set_blocking($pipes[1], FALSE);
-$test_string = b"yay!\n";
+$test_string = "yay!\n";
 fwrite($pipes[0], $test_string);
 fflush($pipes[0]);
 fclose($pipes[0]);
@@ -57,7 +57,7 @@ array(2) {
   [1]=>
   resource(%d) of type (stream)
 }
-%unicode|string%(5) "yay!
+string(5) "yay!
 "
 array(3) {
   [0]=>

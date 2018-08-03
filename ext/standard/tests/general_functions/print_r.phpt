@@ -1,9 +1,5 @@
 --TEST--
 Test print_r() function
---SKIPIF--
-<?php
-if (PHP_INT_SIZE != 4) die("skip this test is for 32bit platform only");
-?>
 --INI--
 precision=14
 --FILE--
@@ -1720,8 +1716,12 @@ Array
 
 
 *** Testing print_r() on anonymous functions ***
+
+Deprecated: Function create_function() is deprecated in %s on line %d
 New anonymous function:  lambda_1
-2 * 3 = 6 lambda_2
+2 * 3 = 6
+Deprecated: Function create_function() is deprecated in %s on line %d
+ lambda_2
 
 *** Testing error conditions ***
 

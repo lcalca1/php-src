@@ -3,9 +3,6 @@ Function overloading test 1
 --SKIPIF--
 <?php 
 	extension_loaded('mbstring') or die('skip mbstring not available'); 
-	if (!function_exists("mail")) {
-		die('skip mail() function is not available.');
-	}
 ?>
 --INI--
 output_handler=
@@ -20,6 +17,7 @@ $str = '∏µœΩÕ‹ªΩ–Úº“∫æµΩ…Ω∏Ω«ΩŒœ…Ωº®±ΩÃ»ƒ‰ÀΩŒœ≈Ω…’πΩ ∏∑Ωª“ÕΩ√ŒÒΩ∆¨•Ω•’•°°º';
 var_dump(strlen($str));
 var_dump(mb_strlen($str));
 --EXPECT--
+Deprecated: The mbstring.func_overload directive is deprecated in Unknown on line 0
 EUC-JP
 int(33)
 int(33)

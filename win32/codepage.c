@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2016 The PHP Group                                |
+   | Copyright (c) 1997-2018 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -20,9 +20,14 @@
 
 #include "php.h"
 #include "SAPI.h"
+#include <emmintrin.h>
 
-ZEND_TLS const struct php_win32_cp *cur_cp  = NULL;
+ZEND_TLS const struct php_win32_cp *cur_cp = NULL;
 ZEND_TLS const struct php_win32_cp *orig_cp = NULL;
+ZEND_TLS const struct php_win32_cp *cur_out_cp = NULL;
+ZEND_TLS const struct php_win32_cp *orig_out_cp = NULL;
+ZEND_TLS const struct php_win32_cp *cur_in_cp = NULL;
+ZEND_TLS const struct php_win32_cp *orig_in_cp = NULL;
 
 #include "cp_enc_map.c"
 
@@ -32,25 +37,29 @@ __forceinline static wchar_t *php_win32_cp_to_w_int(const char* in, size_t in_le
 	int ret_len, tmp_len;
 
 	if (!in || in_len > (size_t)INT_MAX) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_INVALID_PARAMETER);
 		return NULL;
 	}
-	assert(in_len ? in[in_len] == L'\0' : 1);
+	assert(in_len ? (in[in_len] == L'\0') : 1);
 
 	tmp_len = !in_len ? -1 : (int)in_len + 1;
 
 	ret_len = MultiByteToWideChar(cp, flags, in, tmp_len, NULL, 0);
 	if (ret_len == 0) {
+		SET_ERRNO_FROM_WIN32_CODE(GetLastError());
 		return NULL;
 	}
 
 	ret = malloc(ret_len * sizeof(wchar_t));
 	if (!ret) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_OUTOFMEMORY);
 		return NULL;
 	}
 
 	tmp_len = MultiByteToWideChar(cp, flags, in, tmp_len, ret, ret_len);
 	if (tmp_len == 0) {
 		free(ret);
+		SET_ERRNO_FROM_WIN32_CODE(GetLastError());
 		return NULL;
 	}
 
@@ -85,76 +94,116 @@ PW32CP wchar_t *php_win32_cp_conv_to_w(DWORD cp, DWORD flags, const char* in, si
 	return php_win32_cp_to_w_int(in, in_len, out_len, cp, flags);
 }/*}}}*/
 
+#define ASCII_FAIL_RETURN() \
+	if (PHP_WIN32_CP_IGNORE_LEN_P != out_len) { \
+		*out_len = 0; \
+	} \
+	return NULL;
 PW32CP wchar_t *php_win32_cp_conv_ascii_to_w(const char* in, size_t in_len, size_t *out_len)
 {/*{{{*/
-	wchar_t *ret = NULL;
-	const char *idx = in, *end; 
+	wchar_t *ret, *ret_idx;
+	const char *idx = in, *end;
 
 	assert(in && in_len ? in[in_len] == '\0' : 1);
 
 	if (!in) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_INVALID_PARAMETER);
 		return NULL;
 	} else if (0 == in_len) {
 		/* Not binary safe. */
 		in_len = strlen(in);
-		if (in_len > (size_t)INT_MAX) {
-			return NULL;
-		}
 	}
 
 	end = in + in_len;
 
-	while (idx != end) {
+	if (in_len > 15) {
+		const char *aidx = (const char *)ZEND_SLIDE_TO_ALIGNED16(in);
+
+		/* Process unaligned chunk. */
+		while (idx < aidx) {
+			if (!__isascii(*idx) && '\0' != *idx) {
+				ASCII_FAIL_RETURN()
+			}
+			idx++;
+		}
+
+		/* Process aligned chunk. */
+		while (end - idx > 15) {
+			const __m128i block = _mm_load_si128((__m128i *)idx);
+			if (_mm_movemask_epi8(block)) {
+				ASCII_FAIL_RETURN()
+			}
+			idx += 16;
+		}
+	}
+
+	/* Process the trailing part, or otherwise process string < 16 bytes. */
+	while (idx < end) {
 		if (!__isascii(*idx) && '\0' != *idx) {
-			break;
+			ASCII_FAIL_RETURN()
 		}
 		idx++;
 	}
 
-	if (idx == end) {
-		size_t i = 0;
-		int k = 0;
-		wchar_t *ret_idx;
+	ret = malloc((in_len+1)*sizeof(wchar_t));
+	if (!ret) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_OUTOFMEMORY);
+		return NULL;
+	}
 
-		ret = malloc((in_len+1)*sizeof(wchar_t));
-		if (!ret) {
-			return NULL;
+	ret_idx = ret;
+	idx = in;
+
+	/* Check and conversion could be merged. This however would
+		be more expencive, if a non ASCII string was passed.
+		TODO check whether the impact is acceptable. */
+	if (in_len > 15) {
+		const char *aidx = (const char *)ZEND_SLIDE_TO_ALIGNED16(in);
+
+		/* Process unaligned chunk. */
+		while (idx < aidx) {
+			*ret_idx++ = (wchar_t)*idx++;
 		}
 
-		ret_idx = ret;
-		do {
-			k = _snwprintf(ret_idx, in_len - i, L"%.*hs", (int)(in_len - i), in);
+		/* Process aligned chunk. */
+		if (end - idx > 15) {
+			const __m128i mask = _mm_set1_epi32(0);
+			while (end - idx > 15) {
+				const __m128i block = _mm_load_si128((__m128i *)idx);
 
-			if (-1 == k) {
-				free(ret);
-				return NULL;
+				{
+					const __m128i lo = _mm_unpacklo_epi8(block, mask);
+					_mm_storeu_si128((__m128i *)ret_idx, lo);
+				}
+
+				ret_idx += 8;
+				{ 
+					const __m128i hi = _mm_unpackhi_epi8(block, mask);
+					_mm_storeu_si128((__m128i *)ret_idx, hi);
+				}
+
+				idx += 16;
+				ret_idx += 8;
 			}
-
-			i += k + 1;
-
-			if (i < in_len) {
-				/* Advance as this seems to be a string with \0 in it. */
-				in += k + 1;
-				ret_idx += k + 1;
-			}
-
-
-		} while (i < in_len);
-		ret[in_len] = L'\0';
-
-		assert(ret ? wcslen(ret) == in_len : 1);
-
-		if (PHP_WIN32_CP_IGNORE_LEN_P != out_len) {
-			*out_len = in_len;
 		}
-	} else {
-		if (PHP_WIN32_CP_IGNORE_LEN_P != out_len) {
-			*out_len = 0;
-		}
+	}
+
+	/* Process the trailing part, or otherwise process string < 16 bytes. */
+	while (idx < end) {
+		*ret_idx++ = (wchar_t)*idx++;
+	}
+
+	ret[in_len] = L'\0';
+
+	assert(ret ? wcslen(ret) == in_len : 1);
+
+	if (PHP_WIN32_CP_IGNORE_LEN_P != out_len) {
+		*out_len = in_len;
 	}
 
 	return ret;
 }/*}}}*/
+#undef ASCII_FAIL_RETURN
 
 __forceinline static char *php_win32_cp_from_w_int(const wchar_t* in, size_t in_len, size_t *out_len, UINT cp, DWORD flags)
 {/*{{{*/
@@ -163,6 +212,7 @@ __forceinline static char *php_win32_cp_from_w_int(const wchar_t* in, size_t in_
 	char* target;
 
 	if (!in || in_len > INT_MAX) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_INVALID_PARAMETER);
 		return NULL;
 	}
 	assert(in_len ? in[in_len] == '\0' : 1);
@@ -171,19 +221,20 @@ __forceinline static char *php_win32_cp_from_w_int(const wchar_t* in, size_t in_
 
 	target_len = WideCharToMultiByte(cp, flags, in, tmp_len, NULL, 0, NULL, NULL);
 	if (target_len == 0) {
+		SET_ERRNO_FROM_WIN32_CODE(GetLastError());
 		return NULL;
 	}
 
 	target = malloc(target_len);
 	if (target == NULL) {
-		SetLastError(ERROR_OUTOFMEMORY);
-		_set_errno(ENOMEM);
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_OUTOFMEMORY);
 		return NULL;
 	}
 
 	r = WideCharToMultiByte(cp, flags, in, tmp_len, target, target_len, NULL, NULL);
 	if (r == 0) {
 		free(target);
+		SET_ERRNO_FROM_WIN32_CODE(GetLastError());
 		return NULL;
 	}
 
@@ -238,6 +289,11 @@ __forceinline static char *php_win32_cp_get_enc(void)
 	return enc;
 }/*}}}*/
 
+__forceinline static BOOL php_win32_cp_is_cli_sapi()
+{/*{{{*/
+	return strlen(sapi_module.name) >= sizeof("cli") - 1 && !strncmp(sapi_module.name, "cli", sizeof("cli") - 1);
+}/*}}}*/
+
 PW32CP const struct php_win32_cp *php_win32_cp_get_current(void)
 {/*{{{*/
 	return cur_cp;
@@ -252,11 +308,24 @@ PW32CP const struct php_win32_cp *php_win32_cp_get_by_id(DWORD id)
 {/*{{{*/
 	size_t i;
 
+	if (id < php_win32_cp_map[0].id) {
+		switch (id) {
+			case CP_ACP:
+				id = GetACP();
+				break;
+			case CP_OEMCP:
+				id = GetOEMCP();
+				break;
+		}
+	}
+
 	for (i = 0; i < sizeof(php_win32_cp_map)/sizeof(struct php_win32_cp); i++) {
 		if (php_win32_cp_map[i].id == id) {
 			return &php_win32_cp_map[i];
 		}
 	}
+
+	SET_ERRNO_FROM_WIN32_CODE(ERROR_NOT_FOUND);
 
 	return NULL;
 }/*}}}*/
@@ -279,7 +348,6 @@ PW32CP const struct php_win32_cp *php_win32_cp_get_by_enc(const char *enc)
 		}
 
 		if (0 == zend_binary_strcasecmp(enc, enc_len, cp->name, strlen(cp->name))) {
-			cur_cp = cp;
 			return cp;
 		}
 
@@ -290,7 +358,6 @@ PW32CP const struct php_win32_cp *php_win32_cp_get_by_enc(const char *enc)
 
 			while (NULL != idx) {
 				if (0 == zend_binary_strcasecmp(enc, enc_len, start, idx - start)) {
-					cur_cp = cp;
 					return cp;
 				}
 				start = idx + 1;
@@ -298,7 +365,6 @@ PW32CP const struct php_win32_cp *php_win32_cp_get_by_enc(const char *enc)
 			}
 			/* Last in the list, or single charset specified. */
 			if (0 == zend_binary_strcasecmp(enc, enc_len, start, strlen(start))) {
-				cur_cp = cp;
 				return cp;
 			}
 		}
@@ -311,6 +377,7 @@ PW32CP const struct php_win32_cp *php_win32_cp_set_by_id(DWORD id)
 {/*{{{*/
 	const struct php_win32_cp *tmp;
 	if (!IsValidCodePage(id)) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_INVALID_PARAMETER);
 		return NULL;
 	}
 
@@ -334,16 +401,16 @@ PW32CP wchar_t *php_win32_cp_env_any_to_w(const char* env)
 	size_t bin_len = 0;
 
 	if (!env) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_INVALID_PARAMETER);
 		return NULL;
 	}
 
 	do {
 		wchar_t *tmp;
-		size_t tmp_len;
 
 		tmp = php_win32_cp_any_to_w(cur);
 		if (tmp) {
-			tmp_len = wcslen(tmp) + 1;
+			size_t tmp_len = wcslen(tmp) + 1;
 			memmove(ew + bin_len, tmp, tmp_len * sizeof(wchar_t));
 			free(tmp);
 
@@ -354,7 +421,11 @@ PW32CP wchar_t *php_win32_cp_env_any_to_w(const char* env)
 
 	} while (NULL != (cur = strchr(prev, '\0')) && cur++ && *cur && bin_len + (cur - prev) < 32760);
 
-	envw = (wchar_t *) malloc((bin_len + 3) * sizeof(wchar_t));	
+	envw = (wchar_t *) malloc((bin_len + 3) * sizeof(wchar_t));
+	if (!envw) {
+		SET_ERRNO_FROM_WIN32_CODE(ERROR_OUTOFMEMORY);
+		return NULL;
+	}
 	memmove(envw, ew, bin_len * sizeof(wchar_t));
 	envw[bin_len] = L'\0';
 	envw[bin_len + 1] = L'\0';
@@ -363,18 +434,60 @@ PW32CP wchar_t *php_win32_cp_env_any_to_w(const char* env)
 	return envw;
 }/*}}}*/
 
+static BOOL php_win32_cp_cli_io_setup(void)
+{/*{{{*/
+	BOOL ret = TRUE;
+
+	if (PG(input_encoding) && PG(input_encoding)[0]) {
+		cur_in_cp = php_win32_cp_get_by_enc(PG(input_encoding));
+		if (!cur_in_cp) {
+			cur_in_cp = cur_cp;
+		}
+	} else {
+		cur_in_cp = cur_cp;
+	}
+
+	if (PG(output_encoding) && PG(output_encoding)[0]) {
+		cur_out_cp = php_win32_cp_get_by_enc(PG(output_encoding));
+		if (!cur_out_cp) {
+			cur_out_cp = cur_cp;
+		}
+	} else {
+		cur_out_cp = cur_cp;
+	}
+
+	if(php_get_module_initialized()) {
+		ret = SetConsoleCP(cur_in_cp->id) && SetConsoleOutputCP(cur_out_cp->id);
+	}
+
+	return ret;
+}/*}}}*/
+
 PW32CP const struct php_win32_cp *php_win32_cp_do_setup(const char *enc)
 {/*{{{*/
 	if (!enc) {
 		enc = php_win32_cp_get_enc();
 	}
 
-	if (!strcmp(sapi_module.name, "cli")) {
-		orig_cp = php_win32_cp_get_by_id(GetConsoleCP());
-	} else {
+	cur_cp = php_win32_cp_get_by_enc(enc);
+	if (!orig_cp) {
 		orig_cp = php_win32_cp_get_by_id(GetACP());
 	}
-	cur_cp = php_win32_cp_get_by_enc(enc);
+	if (php_win32_cp_is_cli_sapi()) {
+		if (!orig_in_cp) {
+			orig_in_cp = php_win32_cp_get_by_id(GetConsoleCP());
+			if (!orig_in_cp) {
+				orig_in_cp = orig_cp;
+			}
+		}
+		if (!orig_out_cp) {
+			orig_out_cp = php_win32_cp_get_by_id(GetConsoleOutputCP());
+			if (!orig_out_cp) {
+				orig_out_cp = orig_cp;
+			}
+		}
+		php_win32_cp_cli_io_setup();
+	}
 
 	return cur_cp;
 }/*}}}*/
@@ -386,8 +499,8 @@ PW32CP const struct php_win32_cp *php_win32_cp_do_update(const char *enc)
 	}
 	cur_cp = php_win32_cp_get_by_enc(enc);
 
-	if (!strcmp(sapi_module.name, "cli")) {
-		php_win32_cp_cli_update();
+	if (php_win32_cp_is_cli_sapi()) {
+		php_win32_cp_cli_do_setup(cur_cp->id);
 	}
 
 	return cur_cp;
@@ -417,7 +530,7 @@ PW32CP const struct php_win32_cp *php_win32_cp_cli_do_setup(DWORD id)
 		return NULL;
 	}
 
-	if (SetConsoleOutputCP(cp->id) && SetConsoleCP(cp->id)) {
+	if (php_win32_cp_cli_io_setup()) {
 		return cp;
 	}
 
@@ -426,16 +539,18 @@ PW32CP const struct php_win32_cp *php_win32_cp_cli_do_setup(DWORD id)
 
 PW32CP const struct php_win32_cp *php_win32_cp_cli_do_restore(DWORD id)
 {/*{{{*/
-	if (!id && orig_cp) {
-		id = orig_cp->id;
+	BOOL cli_io_restored = TRUE;
+
+	if (orig_in_cp) {
+		cli_io_restored = cli_io_restored && SetConsoleCP(orig_in_cp->id);
 	}
 
-	if (SetConsoleOutputCP(id) && SetConsoleCP(id)) {
-		if (orig_cp) {
-			return orig_cp;
-		} else {
-			return php_win32_cp_set_by_id(id);
-		}
+	if (orig_out_cp) {
+		cli_io_restored = cli_io_restored && SetConsoleOutputCP(orig_out_cp->id);
+	}
+
+	if (cli_io_restored && id) {
+		return php_win32_cp_set_by_id(id);
 	}
 
 	return NULL;
@@ -445,7 +560,7 @@ PW32CP const struct php_win32_cp *php_win32_cp_cli_do_restore(DWORD id)
 
 /* {{{ proto bool sapi_windows_cp_set(int cp)
  * Set process codepage. */
-PHP_FUNCTION(sapi_windows_cp_set) 
+PHP_FUNCTION(sapi_windows_cp_set)
 {
 	zend_long id;
 	const struct php_win32_cp *cp;
@@ -459,7 +574,7 @@ PHP_FUNCTION(sapi_windows_cp_set)
 		RETURN_FALSE;
 	}
 
-	if (!strcmp(sapi_module.name, "cli")) {
+	if (php_win32_cp_is_cli_sapi()) {
 		cp = php_win32_cp_cli_do_setup((DWORD)id);
 	} else {
 		cp = php_win32_cp_set_by_id((DWORD)id);
@@ -526,12 +641,12 @@ PHP_FUNCTION(sapi_windows_cp_conv)
 		php_error_docref(NULL, E_WARNING, "String is too long");
 		RETURN_NULL();
 	}
-	
+
 	if (IS_LONG == Z_TYPE_P(z_in_cp)) {
 		if (ZEND_LONG_UINT_OVFL(Z_LVAL_P(z_in_cp))) {
 			php_error_docref(NULL, E_WARNING, "Argument %d is out of range", Z_LVAL_P(z_in_cp));
 			RETURN_NULL();
-		} 
+		}
 
 		in_cp = php_win32_cp_get_by_id((DWORD)Z_LVAL_P(z_in_cp));
 		if (!in_cp) {
@@ -552,7 +667,7 @@ PHP_FUNCTION(sapi_windows_cp_conv)
 		if (ZEND_LONG_UINT_OVFL(Z_LVAL_P(z_out_cp))) {
 			php_error_docref(NULL, E_WARNING, "Argument %d is out of range", Z_LVAL_P(z_out_cp));
 			RETURN_NULL();
-		} 
+		}
 
 		out_cp = php_win32_cp_get_by_id((DWORD)Z_LVAL_P(z_out_cp));
 		if (!out_cp) {

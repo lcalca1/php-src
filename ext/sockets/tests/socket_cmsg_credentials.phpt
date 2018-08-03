@@ -8,6 +8,12 @@ die('skip sockets extension not available.');
 if (strtolower(substr(PHP_OS, 0, 3)) == 'win') {
 die('skip not for Microsoft Windows');
 }
+if (strtolower(substr(PHP_OS, 0, 3)) == 'aix') {
+die('skip not for AIX');
+}
+if (!defined('SO_PASSCRED')) {
+die('skip SO_PASSCRED is not defined');
+}
 --CLEAN--
 <?php
 $path = __DIR__ . "/unix_sock";

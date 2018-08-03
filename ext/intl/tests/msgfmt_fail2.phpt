@@ -1,8 +1,8 @@
 --TEST--
 msgfmt creation failures icu >= 4.8
 --SKIPIF--
-<?php if( !extension_loaded( 'intl' ) ) print 'skip'; ?>
-<?php if(version_compare(INTL_ICU_VERSION, '4.8') < 0) print 'skip'; ?>
+<?php if( !extension_loaded( 'intl' ) ) print 'skip intl extension not loaded'; ?>
+<?php if(version_compare(INTL_ICU_VERSION, '4.8') < 0) print 'skip for ICU > 4.8'; ?>
 --FILE--
 <?php
 
@@ -79,7 +79,7 @@ foreach($args as $arg) {
 
 ?>
 --EXPECTF--
-TypeError: MessageFormatter::__construct() expects exactly 2 parameters, 0 given in %s on line %d
+ArgumentCountError: MessageFormatter::__construct() expects exactly 2 parameters, 0 given in %s on line %d
 'msgfmt_create: unable to parse input parameters: U_ILLEGAL_ARGUMENT_ERROR'
 
 Warning: msgfmt_create() expects exactly 2 parameters, 0 given in %s on line %d
@@ -88,7 +88,7 @@ Warning: msgfmt_create() expects exactly 2 parameters, 0 given in %s on line %d
 Warning: MessageFormatter::create() expects exactly 2 parameters, 0 given in %s on line %d
 'msgfmt_create: unable to parse input parameters: U_ILLEGAL_ARGUMENT_ERROR'
 
-TypeError: MessageFormatter::__construct() expects exactly 2 parameters, 1 given in %s on line %d
+ArgumentCountError: MessageFormatter::__construct() expects exactly 2 parameters, 1 given in %s on line %d
 'msgfmt_create: unable to parse input parameters: U_ILLEGAL_ARGUMENT_ERROR'
 
 Warning: msgfmt_create() expects exactly 2 parameters, 1 given in %s on line %d

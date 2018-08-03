@@ -1,8 +1,8 @@
 --TEST--
 locale_parse_locale() icu >= 4.8
 --SKIPIF--
-<?php if( !extension_loaded( 'intl' ) ) print 'skip'; ?>
-<?php if(version_compare(INTL_ICU_VERSION, '4.8') < 0) print 'skip'; ?>
+<?php if( !extension_loaded( 'intl' ) ) print 'skip intl extension not loaded'; ?>
+<?php if(version_compare(INTL_ICU_VERSION, '4.8') < 0) print 'skip for ICU > 4.8'; ?>
 --FILE--
 <?php
 
@@ -96,7 +96,7 @@ include_once( 'ut_common.inc' );
 ut_run();
 
 ?>
---EXPECTF--
+--EXPECT--
 ---------------------
 uk-ua_CALIFORNIA@currency=;currency=GRN:
 language : 'uk' , region : 'UA' , variant0 : 'CALIFORNIA' ,

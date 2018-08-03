@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2016 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2018 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,8 +16,6 @@
    |          Zeev Suraski <zeev@zend.com>                                |
    +----------------------------------------------------------------------+
 */
-
-/* $Id$ */
 
 #ifndef ZEND_GLOBALS_H
 #define ZEND_GLOBALS_H
@@ -105,17 +103,10 @@ struct _zend_compiler_globals {
 
 	uint32_t compiler_options; /* set of ZEND_COMPILE_* constants */
 
-	HashTable const_filenames;
-
 	zend_oparray_context context;
 	zend_file_context file_context;
 
 	zend_arena *arena;
-
-	zend_string *empty_string;
-	zend_string *one_char_string[256];
-	zend_string **known_strings;
-	uint32_t    known_strings_count;
 
 	HashTable interned_strings;
 
@@ -162,6 +153,7 @@ struct _zend_executor_globals {
 	zval          *vm_stack_top;
 	zval          *vm_stack_end;
 	zend_vm_stack  vm_stack;
+	size_t         vm_stack_page_size;
 
 	struct _zend_execute_data *current_execute_data;
 	zend_class_entry *fake_scope; /* used to avoid checks accessing properties */
@@ -169,6 +161,10 @@ struct _zend_executor_globals {
 	zend_long precision;
 
 	int ticks_count;
+
+	uint32_t persistent_constants_count;
+	uint32_t persistent_functions_count;
+	uint32_t persistent_classes_count;
 
 	HashTable *in_autoload;
 	zend_function *autoload_func;
@@ -215,7 +211,7 @@ struct _zend_executor_globals {
 	struct _zend_module_entry *current_module;
 
 	zend_bool active;
-	zend_bool valid_symbol_table;
+	zend_uchar flags;
 
 	zend_long assertions;
 
@@ -232,8 +228,13 @@ struct _zend_executor_globals {
 	zend_function trampoline;
 	zend_op       call_trampoline_op;
 
+	zend_bool each_deprecation_thrown;
+
 	void *reserved[ZEND_MAX_RESERVED_RESOURCES];
 };
+
+#define EG_FLAGS_INITIAL	0x00
+#define EG_FLAGS_IN_SHUTDOWN	0x01
 
 struct _zend_ini_scanner_globals {
 	zend_file_handle *yy_in;
@@ -274,6 +275,9 @@ struct _zend_php_scanner_globals {
 	int yy_state;
 	zend_stack state_stack;
 	zend_ptr_stack heredoc_label_stack;
+	zend_bool heredoc_scan_ahead;
+	int heredoc_indentation;
+	zend_bool heredoc_indentation_uses_spaces;
 
 	/* original (unfiltered) script */
 	unsigned char *script_org;
@@ -292,7 +296,8 @@ struct _zend_php_scanner_globals {
 	int scanned_string_len;
 
 	/* hooks */
-	void (* on_event)(zend_php_scanner_event event, int token, int line);
+	void (*on_event)(zend_php_scanner_event event, int token, int line, void *context);
+	void *on_event_context;
 };
 
 #endif /* ZEND_GLOBALS_H */
@@ -303,4 +308,6 @@ struct _zend_php_scanner_globals {
  * c-basic-offset: 4
  * indent-tabs-mode: t
  * End:
+ * vim600: sw=4 ts=4 fdm=marker
+ * vim<600: sw=4 ts=4
  */

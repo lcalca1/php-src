@@ -3,8 +3,6 @@
 /*
  * phpdbg_parser.y
  * (from php-src root)
- * flex sapi/phpdbg/dev/phpdbg_lexer.l
- * bison sapi/phpdbg/dev/phpdbg_parser.y
  */
 
 #include "phpdbg.h"
@@ -193,6 +191,11 @@ int phpdbg_do_parse(phpdbg_param_t *stack, char *input) {
 	if (!*input) {
 		return 0;
 	}
+
+	if (PHPDBG_G(cur_command)) {
+		free(PHPDBG_G(cur_command));
+	}
+	PHPDBG_G(cur_command) = strdup(input);
 
 	phpdbg_init_lexer(stack, input);
 

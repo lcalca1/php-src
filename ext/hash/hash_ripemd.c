@@ -2,7 +2,7 @@
   +----------------------------------------------------------------------+
   | PHP Version 7                                                        |
   +----------------------------------------------------------------------+
-  | Copyright (c) 1997-2016 The PHP Group                                |
+  | Copyright (c) 1997-2018 The PHP Group                                |
   +----------------------------------------------------------------------+
   | This source file is subject to version 3.01 of the PHP license,      |
   | that is bundled with this package in the file LICENSE, and is        |
@@ -15,8 +15,6 @@
   | Author: Sara Golemon <pollita@php.net>                               |
   +----------------------------------------------------------------------+
 */
-
-/* $Id$ */
 
 /* Heavily borrowed from md5.c & sha1.c of PHP archival fame
    Note that ripemd laughs in the face of logic and uses
@@ -32,7 +30,8 @@ const php_hash_ops php_hash_ripemd128_ops = {
 	(php_hash_copy_func_t) php_hash_copy,
 	16,
 	64,
-	sizeof(PHP_RIPEMD128_CTX)
+	sizeof(PHP_RIPEMD128_CTX),
+	1
 };
 
 const php_hash_ops php_hash_ripemd160_ops = {
@@ -42,7 +41,8 @@ const php_hash_ops php_hash_ripemd160_ops = {
 	(php_hash_copy_func_t) php_hash_copy,
 	20,
 	64,
-	sizeof(PHP_RIPEMD160_CTX)
+	sizeof(PHP_RIPEMD160_CTX),
+	1
 };
 
 const php_hash_ops php_hash_ripemd256_ops = {
@@ -52,7 +52,8 @@ const php_hash_ops php_hash_ripemd256_ops = {
 	(php_hash_copy_func_t) php_hash_copy,
 	32,
 	64,
-	sizeof(PHP_RIPEMD256_CTX)
+	sizeof(PHP_RIPEMD256_CTX),
+	1
 };
 
 const php_hash_ops php_hash_ripemd320_ops = {
@@ -62,7 +63,8 @@ const php_hash_ops php_hash_ripemd320_ops = {
 	(php_hash_copy_func_t) php_hash_copy,
 	40,
 	64,
-	sizeof(PHP_RIPEMD320_CTX)
+	sizeof(PHP_RIPEMD320_CTX),
+	1
 };
 
 /* {{{ PHP_RIPEMD128Init
