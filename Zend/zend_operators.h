@@ -24,10 +24,7 @@
 #include <errno.h>
 #include <math.h>
 #include <assert.h>
-
-#ifdef __GNUC__
 #include <stddef.h>
-#endif
 
 #ifdef HAVE_IEEEFP_H
 #include <ieeefp.h>
@@ -471,7 +468,7 @@ ZEND_API void zend_update_current_locale(void);
 
 static zend_always_inline void fast_long_increment_function(zval *op1)
 {
-#if defined(HAVE_ASM_GOTO) && defined(__i386__)
+#if defined(HAVE_ASM_GOTO) && defined(__i386__) && !(4 == __GNUC__ && 8 == __GNUC_MINOR__)
 	__asm__ goto(
 		"addl $1,(%0)\n\t"
 		"jo  %l1\n"
@@ -521,7 +518,7 @@ overflow: ZEND_ATTRIBUTE_COLD_LABEL
 
 static zend_always_inline void fast_long_decrement_function(zval *op1)
 {
-#if defined(HAVE_ASM_GOTO) && defined(__i386__)
+#if defined(HAVE_ASM_GOTO) && defined(__i386__) && !(4 == __GNUC__ && 8 == __GNUC_MINOR__)
 	__asm__ goto(
 		"subl $1,(%0)\n\t"
 		"jo  %l1\n"
@@ -571,7 +568,7 @@ overflow: ZEND_ATTRIBUTE_COLD_LABEL
 
 static zend_always_inline void fast_long_add_function(zval *result, zval *op1, zval *op2)
 {
-#if defined(HAVE_ASM_GOTO) && defined(__i386__)
+#if defined(HAVE_ASM_GOTO) && defined(__i386__) && !(4 == __GNUC__ && 8 == __GNUC_MINOR__)
 	__asm__ goto(
 		"movl	(%1), %%eax\n\t"
 		"addl   (%2), %%eax\n\t"
@@ -661,7 +658,7 @@ static zend_always_inline int fast_add_function(zval *result, zval *op1, zval *o
 
 static zend_always_inline void fast_long_sub_function(zval *result, zval *op1, zval *op2)
 {
-#if defined(HAVE_ASM_GOTO) && defined(__i386__)
+#if defined(HAVE_ASM_GOTO) && defined(__i386__) && !(4 == __GNUC__ && 8 == __GNUC_MINOR__)
 	__asm__ goto(
 		"movl	(%1), %%eax\n\t"
 		"subl   (%2), %%eax\n\t"

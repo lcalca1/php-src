@@ -79,6 +79,7 @@ VC_VERSIONS[1912] = 'MSVC15 (Visual C++ 2017)';
 VC_VERSIONS[1913] = 'MSVC15 (Visual C++ 2017)';
 VC_VERSIONS[1914] = 'MSVC15 (Visual C++ 2017)';
 VC_VERSIONS[1915] = 'MSVC15 (Visual C++ 2017)';
+VC_VERSIONS[1916] = 'MSVC15 (Visual C++ 2017)';
 
 var VC_VERSIONS_SHORT = new Array();
 VC_VERSIONS_SHORT[1700] = 'VC11';
@@ -90,6 +91,7 @@ VC_VERSIONS_SHORT[1912] = 'VC15';
 VC_VERSIONS_SHORT[1913] = 'VC15';
 VC_VERSIONS_SHORT[1914] = 'VC15';
 VC_VERSIONS_SHORT[1915] = 'VC15';
+VC_VERSIONS_SHORT[1916] = 'VC15';
 
 if (PROGRAM_FILES == null) {
 	PROGRAM_FILES = "C:\\Program Files";
@@ -1469,9 +1471,15 @@ function EXTENSION(extname, file_list, shared, cflags, dllname, obj_dir)
 			// Add compiler and link flags if PGO options are selected
 			if (PHP_DEBUG != "yes" && PHP_PGI == "yes") {
 				ADD_FLAG('LDFLAGS_' + EXT, "/LTCG /GENPROFILE");
+				if (VCVERS >= 1914) {
+					ADD_FLAG('LDFLAGS_' + EXT, "/d2:-FuncCache1");
+				}
 			}
 			else if (PHP_DEBUG != "yes" && PHP_PGO != "no") {
 				ADD_FLAG('LDFLAGS_' + EXT, "/LTCG /USEPROFILE");
+				if (VCVERS >= 1914) {
+					ADD_FLAG('LDFLAGS_' + EXT, "/d2:-FuncCache1");
+				}
 			}
 
 			ADD_FLAG('CFLAGS_' + EXT, "/GL /O2");
@@ -3214,6 +3222,11 @@ function toolset_setup_common_cflags()
 						/* Undocumented. */
 						ADD_FLAG('CFLAGS', "/d2guardspecload");
 					}
+				} else if (1900 == VCVERS) {
+					var subver1900 = probe_binary(PHP_CL).substr(6);
+					if (subver1900 >= 24241) {
+						ADD_FLAG('CFLAGS', "/Qspectre");
+					}
 				}
 			}
 			if (VCVERS >= 1900) {
@@ -3640,9 +3653,6 @@ function add_asan_opts(cflags_name, libs_name, ldflags_name)
 	if (!!cflags_name) {
 		ADD_FLAG(cflags_name, "-fsanitize=address");
 		ADD_FLAG(cflags_name, "-fsanitize-address-use-after-scope");
-		ADD_FLAG(cflags_name, "-fsanitize-cfi-cross-dso");
-		ADD_FLAG(cflags_name, "-fsanitize-memory-track-origins");
-		ADD_FLAG(cflags_name, "-fsanitize-memory-use-after-dtor");
 	}
 	if (!!libs_name) {
 		if (X64) {

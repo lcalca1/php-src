@@ -198,8 +198,6 @@ void zend_optimizer_compact_literals(zend_op_array *op_array, zend_optimizer_ctx
 					}
 					break;
 				case ZEND_FETCH_CLASS:
-				case ZEND_ADD_INTERFACE:
-				case ZEND_ADD_TRAIT:
 				case ZEND_INSTANCEOF:
 					if (opline->op2_type == IS_CONST) {
 						LITERAL_INFO(opline->op2.constant, LITERAL_CLASS, 2);
@@ -378,6 +376,7 @@ void zend_optimizer_compact_literals(zend_op_array *op_array, zend_optimizer_ctx
 						} else {
 							map[i] = j;
 							ZVAL_LONG(&zv, j);
+							Z_EXTRA(op_array->literals[i]) = 0; /* allow merging with FETCH_DIM_... */
 							zend_hash_index_add_new(&hash, Z_LVAL(op_array->literals[i]), &zv);
 							if (i != j) {
 								op_array->literals[j] = op_array->literals[i];

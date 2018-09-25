@@ -1097,13 +1097,10 @@ static void add_class_vars(zend_class_entry *scope, zend_class_entry *ce, int st
 	zend_string *key;
 
 	ZEND_HASH_FOREACH_STR_KEY_PTR(&ce->properties_info, key, prop_info) {
-		if (((prop_info->flags & ZEND_ACC_SHADOW) &&
-		     prop_info->ce != scope) ||
-		    ((prop_info->flags & ZEND_ACC_PROTECTED) &&
+		if (((prop_info->flags & ZEND_ACC_PROTECTED) &&
 		     !zend_check_protected(prop_info->ce, scope)) ||
 		    ((prop_info->flags & ZEND_ACC_PRIVATE) &&
-		      ce != scope &&
-			  prop_info->ce != scope)) {
+		      prop_info->ce != scope)) {
 			continue;
 		}
 		prop = NULL;
@@ -1118,7 +1115,6 @@ static void add_class_vars(zend_class_entry *scope, zend_class_entry *ce, int st
 		}
 
 		/* copy: enforce read only access */
-		ZVAL_DEREF(prop);
 		ZVAL_COPY_OR_DUP(&prop_copy, prop);
 		prop = &prop_copy;
 
@@ -1300,7 +1296,7 @@ ZEND_FUNCTION(get_class_methods)
 			if (!key) {
 				ZVAL_STR_COPY(&method_name, mptr->common.function_name);
 				zend_hash_next_index_insert_new(Z_ARRVAL_P(return_value), &method_name);
-			} else if ((mptr->common.fn_flags & ZEND_ACC_CTOR) == 0 ||
+			} else if (mptr->common.scope->constructor != mptr ||
 			    mptr->common.scope == ce ||
 			    zend_binary_strcasecmp(ZSTR_VAL(key), ZSTR_LEN(key), ZSTR_VAL(mptr->common.function_name), len) == 0) {
 
@@ -1347,13 +1343,10 @@ ZEND_FUNCTION(method_exists)
 	if (zend_hash_exists(&ce->function_table, lcname)) {
 		zend_string_release_ex(lcname, 0);
 		RETURN_TRUE;
-	} else {
-		union _zend_function *func = NULL;
-
-		if (Z_TYPE_P(klass) == IS_OBJECT
-		&& Z_OBJ_HT_P(klass)->get_method != NULL
-		&& (func = Z_OBJ_HT_P(klass)->get_method(&Z_OBJ_P(klass), method_name, NULL)) != NULL
-		) {
+	} else if (Z_TYPE_P(klass) == IS_OBJECT && Z_OBJ_HT_P(klass)->get_method != NULL) {
+		zend_object *obj = Z_OBJ_P(klass);
+		zend_function *func = Z_OBJ_HT_P(klass)->get_method(&obj, method_name, NULL);
+		if (func != NULL) {
 			if (func->common.fn_flags & ZEND_ACC_CALL_VIA_TRAMPOLINE) {
 				/* Returns true to the fake Closure's __invoke */
 				RETVAL_BOOL(func->common.scope == zend_ce_closure
@@ -1403,8 +1396,10 @@ ZEND_FUNCTION(property_exists)
 		RETURN_NULL();
 	}
 
-	if ((property_info = zend_hash_find_ptr(&ce->properties_info, property)) != NULL
-		&& (property_info->flags & ZEND_ACC_SHADOW) == 0) {
+	property_info = zend_hash_find_ptr(&ce->properties_info, property);
+	if (property_info != NULL
+	 && (!(property_info->flags & ZEND_ACC_PRIVATE)
+	  || property_info->ce == ce)) {
 		RETURN_TRUE;
 	}
 
